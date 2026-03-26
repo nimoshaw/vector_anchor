@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Rust build artifacts (anchor-core)
+anchor-core/target/
+anchor-core/node_modules/
+
 # Build output
 dist/
 
