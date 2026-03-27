@@ -2,7 +2,7 @@
 // Unified utilities: config management, logger, and Zod-to-JSON converter
 
 import { readFileSync, writeFileSync, existsSync, watchFile } from 'fs';
-import { join } from 'path';
+import { join, resolve, isAbsolute, dirname } from 'path';
 import { z } from 'zod';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -181,4 +181,47 @@ function manualConvert(schema: z.ZodType): Record<string, unknown> {
   try { schema.parse(0); return { type: 'number', ...descProp }; } catch {}
   try { schema.parse(true); return { type: 'boolean', ...descProp }; } catch {}
   return { type: 'object', ...descProp };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// .env loader (shared across server + CLI)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Load variables from a .env file into process.env (won't override existing vars) */
+export function loadDotEnv(startDir?: string): void {
+  try {
+    // Walk up from startDir looking for .env
+    let dir = resolve(startDir ?? process.cwd());
+    let envPath = '';
+    for (let i = 0; i < 5; i++) {
+      const candidate = join(dir, '.env');
+      if (existsSync(candidate)) { envPath = candidate; break; }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    if (!envPath) return;
+    const lines = readFileSync(envPath, 'utf-8').split(/\r?\n/);
+    for (const line of lines) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
+    }
+  } catch { /* no .env file, that's fine */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Path validation (prevents directory traversal)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Validate and normalize a user-supplied path.
+ * Returns the resolved absolute path, or throws if it looks malicious.
+ */
+export function validatePath(userPath: string): string {
+  const resolved = resolve(userPath);
+  // Block obvious traversal patterns in the raw input
+  if (userPath.includes('..') && !isAbsolute(userPath)) {
+    throw new Error(`Path rejected: relative traversal not allowed ("${userPath}")`);
+  }
+  return resolved;
 }

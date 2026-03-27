@@ -12,6 +12,7 @@
 //   ⑤ Token 预算感知折叠 (Token Budget-Aware)
 
 import type { SearchResultItem, SearchResult } from './engine.js';
+import { tokenize } from './pipeline.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -94,19 +95,11 @@ function extractCodeSignature(content: string): string | null {
   return match ? match[0].trim().slice(0, 100) : null;
 }
 
-/** Extract top key terms from content (lightweight, no dependencies) */
+/** Extract top key terms from content (reuses pipeline tokenizer) */
 function extractKeyTerms(content: string, n: number): string[] {
-  // Simple frequency-based extraction for terms 3+ chars
-  const words = content
-    .replace(/[^a-zA-Z\u4e00-\u9fff\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 3)
-    .map(w => w.toLowerCase());
-
   const freq = new Map<string, number>();
-  const stopWords = new Set(['the', 'and', 'for', 'from', 'with', 'this', 'that', 'import', 'export', 'const', 'function', 'return', 'async', 'await', 'string', 'number']);
-  for (const w of words) {
-    if (!stopWords.has(w)) freq.set(w, (freq.get(w) ?? 0) + 1);
+  for (const w of tokenize(content)) {
+    freq.set(w, (freq.get(w) ?? 0) + 1);
   }
   return Array.from(freq.entries())
     .sort((a, b) => b[1] - a[1])

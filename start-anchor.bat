@@ -1,4 +1,4 @@
 @echo off
-:: Vector Anchor — HTTP MCP 服务启动脚本
+:: Vector Anchor - HTTP MCP Service
 cd /d "D:\projects\vector_anchor"
 call npx tsx src/server.ts

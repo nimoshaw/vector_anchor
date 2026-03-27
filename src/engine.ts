@@ -120,6 +120,16 @@ export class AnchorManager {
     this.config = DEFAULT_ANCHOR_CONFIG;
   }
 
+  /** Release all heavy in-memory resources (called by LRU eviction) */
+  destroy(): void {
+    this.stopWatch();
+    this.index = null;
+    this._metaCache = null;
+    this._ragCache = null;
+    this.tagGraph = new TagGraph();
+    logger.info(MODULE, `Destroyed manager: ${this.projectRoot}`);
+  }
+
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(apiKey: string, modelName: string, baseUrl?: string, options: InitOptions = {}): Promise<string> {
@@ -235,22 +245,29 @@ export class AnchorManager {
 
   /** Build anchor hierarchy tree for visualization */
   anchorTree(): AnchorTreeNode {
+    const self = this;
     const buildNode = (root: string): AnchorTreeNode => {
       const anchorDir = join(root, ANCHOR_DIR);
       let vectors = 0, tags = 0;
       try {
         const cfg = loadAnchorConfig(anchorDir);
-        // Count vectors from chunk_meta
-        const metaPath = join(anchorDir, 'chunk_meta.json');
-        if (existsSync(metaPath)) {
-          vectors = Object.keys(JSON.parse(readFileSync(metaPath, 'utf-8'))).length;
+
+        // Use in-memory caches for current node, disk for children
+        if (root === self.projectRoot) {
+          vectors = self._metaCache ? Object.keys(self._metaCache).length : 0;
+          tags = self.tagGraph.size;
+        } else {
+          const metaPath = join(anchorDir, 'chunk_meta.json');
+          if (existsSync(metaPath)) {
+            vectors = Object.keys(JSON.parse(readFileSync(metaPath, 'utf-8'))).length;
+          }
+          const tagPath = join(anchorDir, 'tag_graph.json');
+          if (existsSync(tagPath)) {
+            const data = JSON.parse(readFileSync(tagPath, 'utf-8'));
+            tags = data.tags?.length ?? 0;
+          }
         }
-        // Count tags from tag_graph
-        const tagPath = join(anchorDir, 'tag_graph.json');
-        if (existsSync(tagPath)) {
-          const data = JSON.parse(readFileSync(tagPath, 'utf-8'));
-          tags = data.tags?.length ?? 0;
-        }
+
         // Recurse into children
         const children = (cfg.children ?? []).map((childRel: string) => {
           const childRoot = resolve(root, childRel);
@@ -727,7 +744,7 @@ export class AnchorManager {
     for (const fp of filePaths) {
       try {
         const content = readFileSync(join(this.projectRoot, fp), 'utf-8');
-        const chunks = chunkFile(content, extname(fp), this.config.chunk_size, this.config.chunk_overlap);
+        const chunks = await chunkFile(content, extname(fp), this.config.chunk_size, this.config.chunk_overlap, fp);
         for (const chunk of chunks) allChunks.push({ chunk, filePath: fp });
       } catch (err) { logger.warn(MODULE, `Failed to read ${fp}`, err); }
     }

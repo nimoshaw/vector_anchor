@@ -102,7 +102,7 @@ const STOP_WORDS = new Set([
 ]);
 
 /** Tokenize text into candidate terms (handles CJK + Latin) */
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   // Split on non-word boundaries, keep CJK characters and Latin words
   const tokens: string[] = [];
 

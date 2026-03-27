@@ -2,20 +2,16 @@
 // src/cli.ts
 // Vector Anchor CLI — 通过 HTTP 调用已运行的 MCP 服务
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadDotEnv } from './utils.js';
 
-// ─── 读取 .env 获取端口 ──────────────────────────────────────────────────────
+// Load .env for ANCHOR_PORT
+loadDotEnv();
+
 function getPort(): number {
-  try {
-    const envPath = resolve(import.meta.dirname ?? __dirname, '..', '.env');
-    const lines = readFileSync(envPath, 'utf-8').split(/\r?\n/);
-    for (const line of lines) {
-      const m = line.match(/^\s*ANCHOR_PORT\s*=\s*(\d+)/);
-      if (m) return parseInt(m[1], 10);
-    }
-  } catch { /* ignore */ }
-  return 23517;
+  return parseInt(process.env.ANCHOR_PORT ?? '23517', 10);
 }
 
 const BASE = `http://127.0.0.1:${getPort()}`;
@@ -75,7 +71,6 @@ const commands: Record<string, Command> = {
     description: '语义搜索锚点索引',
     usage: 'anchor search <查询> [--top <N>]',
     run: async (args) => {
-      const topIdx = args.indexOf('--top');
       let top_k: number | undefined;
       const queryParts: string[] = [];
       for (let i = 0; i < args.length; i++) {
@@ -133,8 +128,7 @@ async function callTool(name: string, args: Record<string, unknown>) {
   });
 
   if (initRes?.error) {
-    console.error('连接服务失败:', initRes.error.message ?? JSON.stringify(initRes.error));
-    console.error(`请确认服务已启动: npm run serve（在 ${resolve(import.meta.dirname ?? __dirname, '..')}）`);
+    console.error('请确认服务已启动: npm run serve');
     process.exit(1);
   }
 
@@ -157,12 +151,39 @@ async function callTool(name: string, args: Record<string, unknown>) {
   }
 }
 
-// ─── 健康检查 ────────────────────────────────────────────────────────────────
+// ─── 健康检查 + 自动拉起 ──────────────────────────────────────────────────────
+
 async function checkHealth(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/health`);
     return res.ok;
   } catch { return false; }
+}
+
+/** Auto-start server in background, wait up to 5s for it to come up */
+async function autoStartServer(): Promise<boolean> {
+  console.log('⚡ 服务未运行，正在自动启动...');
+  // Resolve project root (where server.ts lives)
+  const thisDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+  const projectRoot = resolve(thisDir, '..');
+
+  const child = spawn('npx', ['tsx', 'src/server.ts'], {
+    cwd: projectRoot,
+    detached: true,
+    stdio: 'ignore',
+    shell: true,
+  });
+  child.unref();
+
+  // Poll /health for up to 5 seconds
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    if (await checkHealth()) {
+      console.log('✅ 服务已自动启动');
+      return true;
+    }
+  }
+  return false;
 }
 
 // ─── 主入口 ──────────────────────────────────────────────────────────────────
@@ -196,13 +217,16 @@ async function main() {
     process.exit(1);
   }
 
-  // 检查服务状态
+  // 检查服务状态 — 未启动则自动拉起
   if (!(await checkHealth())) {
-    console.error('❌ 服务未启动。请先运行: npm run serve');
-    process.exit(1);
+    if (!(await autoStartServer())) {
+      console.error('❌ 服务启动超时。请手动运行: npm run serve');
+      process.exit(1);
+    }
   }
 
   await command.run(args.slice(1));
 }
 
 main().catch(e => { console.error(e.message ?? e); process.exit(1); });
+

@@ -17,7 +17,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "anchor-core": "file:./anchor-core",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.25.10",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

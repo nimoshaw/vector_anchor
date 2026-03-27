@@ -5,8 +5,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import { getAllTools, getTool, registerAllTools, setGlobalEmbedding } from './tools.js';
-import type { ToolContext } from './tools.js';
+import { getAllTools, getTool, registerAllTools, setGlobalEmbedding, handleCallTool } from './tools.js';
 import { logger, zodToJsonSchema } from './utils.js';
 
 const VERSION = '0.1.0';
@@ -44,21 +43,8 @@ async function main() {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const tool = getTool(name);
-    if (!tool) return { content: [{ type: 'text' as const, text: `Unknown: ${name}` }], isError: true };
-
-    try {
-      const parsed = tool.inputSchema.parse(args ?? {});
-      const ctx: ToolContext = {
-        cwd: typeof args === 'object' && args !== null && 'path' in args
-          ? String((args as Record<string, unknown>).path) : process.cwd(),
-      };
-      const result = await tool.handler(parsed, ctx);
-      return { content: result.content, isError: result.isError };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      return { content: [{ type: 'text' as const, text: msg }], isError: true };
-    }
+    const result = await handleCallTool(name, args);
+    return { ...result };
   });
 
   await server.connect(new StdioServerTransport());

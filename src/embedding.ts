@@ -13,7 +13,7 @@ export interface EmbedOptions {
 // ─── LRU Cache ──────────────────────────────────────────────────────────────
 
 const CACHE_MAX = 256;
-const cache = new Map<string, { vec: number[]; ts: number }>();
+const cache = new Map<string, { vec: number[] }>();
 
 function cacheKey(text: string, model: string): string {
   return `${model}::${text}`;
@@ -25,7 +25,6 @@ function cacheGet(text: string, model: string): number[] | undefined {
   if (!entry) return undefined;
   // LRU: move to end
   cache.delete(key);
-  entry.ts = Date.now();
   cache.set(key, entry);
   return entry.vec;
 }
@@ -37,7 +36,7 @@ function cachePut(text: string, model: string, vec: number[]): void {
     const oldest = cache.keys().next().value;
     if (oldest) cache.delete(oldest);
   }
-  cache.set(key, { vec, ts: Date.now() });
+  cache.set(key, { vec });
 }
 
 /** Cache stats for monitoring */
@@ -119,11 +118,11 @@ async function embedOllama(texts: string[], opts: EmbedOptions): Promise<number[
 // ─── Google ────────────────────────────────────────────────────────────────
 
 async function embedGoogle(texts: string[], opts: EmbedOptions): Promise<number[][]> {
-  const url = `${opts.resolved.base_url}/${opts.resolved.model}:batchEmbedContents?key=${opts.apiKey}`;
+  const url = `${opts.resolved.base_url}/${opts.resolved.model}:batchEmbedContents`;
   const requests = texts.map(text => ({ model: opts.resolved.model, content: { parts: [{ text }] } }));
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.apiKey },
     body: JSON.stringify({ requests }),
   });
   if (!res.ok) throw new Error(`Google embed failed (${res.status}): ${await res.text()}`);

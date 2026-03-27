@@ -94,11 +94,15 @@ export function chunkText(content: string, maxSize = 512, overlap = 64): Chunk[]
 
 const MD_EXTS = new Set(['.md', '.mdx', '.markdown']);
 
-export function chunkFile(content: string, ext: string, maxSize = 512, overlap = 64): Chunk[] {
+/** @deprecated Use chunkFile (async, Tree-sitter aware) instead */
+export function chunkFileSync(content: string, ext: string, maxSize = 512, overlap = 64): Chunk[] {
   return MD_EXTS.has(ext.toLowerCase())
     ? chunkMarkdown(content, maxSize, overlap)
     : chunkText(content, maxSize, overlap);
 }
+
+/** Smart async chunker — uses Tree-sitter for code, with fallback */
+export { chunkFileSmart as chunkFile } from './chunker-router.js';
 
 // ─── Shared helper ─────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 
 import { z } from 'zod';
 import { AnchorManager, resolveAnchor } from './engine.js';
-import { loadAnchorConfig, loadRagParams, logger } from './utils.js';
+import { loadAnchorConfig, loadRagParams, logger, validatePath } from './utils.js';
 import { foldSearchResults, foldedOutputToText, formatReadResult, searchSession, type FoldOptions } from './fold.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -30,6 +30,23 @@ function ok(text: string): ToolResult { return { content: [{ type: 'text', text 
 function err(text: string): ToolResult { return { content: [{ type: 'text', text }], isError: true }; }
 function json(data: unknown): ToolResult { return ok(JSON.stringify(data, null, 2)); }
 
+/** Shared call handler for both stdio and HTTP transports */
+export async function handleCallTool(name: string, args: Record<string, unknown> | undefined): Promise<ToolResult> {
+  const tool = getTool(name);
+  if (!tool) return err(`Unknown tool: ${name}`);
+  try {
+    const parsed = tool.inputSchema.parse(args ?? {});
+    const ctx: ToolContext = {
+      cwd: typeof args === 'object' && args !== null && 'path' in args
+        ? String(args.path) : process.cwd(),
+    };
+    return await tool.handler(parsed, ctx);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return err(msg);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Shared state
 // ═══════════════════════════════════════════════════════════════════════════
@@ -45,9 +62,50 @@ export function setGlobalEmbedding(apiKey: string, model: string, baseUrl?: stri
 
 import { resolve } from 'node:path';
 
-const managers = new Map<string, AnchorManager>();
+// ── LRU Cache for AnchorManager instances ────────────────────────────────
+const MAX_MANAGERS = parseInt(process.env.ANCHOR_MAX_MANAGERS ?? '3', 10);
+
+class LRUManagerCache {
+  private map = new Map<string, AnchorManager>();
+  private order: string[] = [];   // front = most recent, back = least recent
+
+  get(key: string): AnchorManager | undefined {
+    const m = this.map.get(key);
+    if (m) this.touch(key);
+    return m;
+  }
+
+  set(key: string, m: AnchorManager): void {
+    if (this.map.has(key)) {
+      this.map.set(key, m);
+      this.touch(key);
+      return;
+    }
+    // Evict LRU if at capacity
+    while (this.map.size >= MAX_MANAGERS && this.order.length > 0) {
+      const evictKey = this.order.pop()!;
+      const evicted = this.map.get(evictKey);
+      if (evicted) {
+        evicted.destroy();
+        this.map.delete(evictKey);
+      }
+    }
+    this.map.set(key, m);
+    this.order.unshift(key);
+  }
+
+  private touch(key: string): void {
+    const idx = this.order.indexOf(key);
+    if (idx > 0) {
+      this.order.splice(idx, 1);
+      this.order.unshift(key);
+    }
+  }
+}
+
+const managers = new LRUManagerCache();
 function mgr(root: string): AnchorManager {
-  const key = resolve(root);
+  const key = resolve(validatePath(root));
   let m = managers.get(key);
   if (!m) { m = new AnchorManager(key); managers.set(key, m); }
   return m;
@@ -162,7 +220,7 @@ export function registerAllTools() {
   reg({
     name: 'anchor_sync',
     description: '增量同步文件变更。',
-    inputSchema: z.object({ force: z.boolean().optional(), recursive: z.boolean().optional() }),
+    inputSchema: z.object({ force: z.boolean().optional() }),
     handler: async (args, ctx) => {
       try {
         const res = ensureMgr(ctx.cwd ?? process.cwd());
